@@ -44,6 +44,18 @@ echo "Using Android NDK: $ANDROID_NDK_HOME"
 echo "Go library source: $LIB_SOURCE"
 echo "JNI output directory: $JNI_LIBS_DIR"
 
+# Apply Android-specific patches to the submodule (idempotent).
+PATCHES_DIR="$ANDROID_APP_DIR/patches"
+if [ -d "$PATCHES_DIR" ]; then
+    for patch in "$PATCHES_DIR"/*.patch; do
+        [ -f "$patch" ] || continue
+        echo "Applying patch: $(basename "$patch")"
+        git -C "$ANDROID_APP_DIR/privatemode-public" apply --check "$(realpath "$patch")" 2>/dev/null \
+            && git -C "$ANDROID_APP_DIR/privatemode-public" apply "$(realpath "$patch")" \
+            || echo "  (already applied or not applicable, skipping)"
+    done
+fi
+
 # Architecture configurations: GOARCH, Android ABI, NDK toolchain target
 declare -A ARCH_MAP=(
     ["arm64"]="arm64-v8a:aarch64-linux-android"
