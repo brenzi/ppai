@@ -14,6 +14,7 @@
 
 # Jsoup
 -keep class org.jsoup.** { *; }
+-dontwarn org.jspecify.annotations.**
 
 # Markwon
 -keep class io.noties.markwon.** { *; }
