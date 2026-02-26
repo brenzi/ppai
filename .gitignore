@@ -1,0 +1,25 @@
+# Build outputs
+app/build/
+app/.cxx/
+build/
+.gradle/
+
+# Prebuilt native libs (rebuilt from source via build-native.sh)
+app/src/main/jniLibs/
+
+# whisper.cpp (external dependency, not part of this repo)
+whisper.cpp/
+
+# IDE
+*.iml
+.idea/*
+!.idea/.name
+!.idea/.gitignore
+!.idea/gradle.xml
+
+# Kotlin
+.kotlin/
+
+# OS
+.DS_Store
+local.properties
