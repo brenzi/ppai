@@ -27,6 +27,8 @@ class PreferencesManager(private val context: Context) {
         private val STT_PROMPT_SHOWN = booleanPreferencesKey("stt_prompt_shown")
         private val STT_MODEL_SIZE = stringPreferencesKey("stt_model_size")
         private val WHISPER_LANGUAGE = stringPreferencesKey("whisper_language")
+        private val TTS_ENABLED = booleanPreferencesKey("tts_enabled")
+        private val TTS_VOICE = stringPreferencesKey("tts_voice")
 
         const val DEFAULT_SERVER_URL = "https://api.privatemode.ai"
     }
@@ -133,6 +135,26 @@ class PreferencesManager(private val context: Context) {
     suspend fun setWhisperLanguage(language: String) {
         context.dataStore.edit { preferences ->
             preferences[WHISPER_LANGUAGE] = language
+        }
+    }
+
+    val ttsEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[TTS_ENABLED] ?: false
+    }
+
+    suspend fun setTtsEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[TTS_ENABLED] = enabled
+        }
+    }
+
+    val ttsVoice: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[TTS_VOICE] ?: "AMY"
+    }
+
+    suspend fun setTtsVoice(voice: String) {
+        context.dataStore.edit { preferences ->
+            preferences[TTS_VOICE] = voice
         }
     }
 }

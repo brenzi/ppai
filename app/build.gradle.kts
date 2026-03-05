@@ -107,11 +107,34 @@ android {
     }
 }
 
-// Wire buildNativeLibs so the .so files are ready before Gradle packages them.
+// ---------------------------------------------------------------------------
+// Task: build sherpa-onnx TTS from source for Android.
+//
+// This calls scripts/build-sherpa-onnx.sh which cross-compiles sherpa-onnx
+// (with onnxruntime, espeak-ng, piper-phonemize) for each Android ABI and
+// places the resulting .so files into jniLibs/ and espeak-ng-data into assets/.
+// ---------------------------------------------------------------------------
+val buildSherpaOnnx by tasks.registering(Exec::class) {
+    description = "Build sherpa-onnx TTS from source for Android"
+    group = "build"
+
+    val scriptFile = project.file("../scripts/build-sherpa-onnx.sh")
+    val sherpaSrc = project.file("../sherpa-onnx/CMakeLists.txt")
+    val jniLibsDir = project.file("src/main/jniLibs")
+
+    inputs.file(scriptFile)
+    inputs.file(sherpaSrc)
+    outputs.dir(jniLibsDir)
+
+    commandLine("bash", scriptFile.absolutePath)
+}
+
+// Wire both native build tasks so .so files are ready before Gradle packages them.
 // Match all merge*JniLibFolders tasks (mergeDebugJniLibFolders, mergeReleaseJniLibFolders, …).
 tasks.configureEach {
     if (name.contains("JniLibFolders")) {
         dependsOn(buildNativeLibs)
+        dependsOn(buildSherpaOnnx)
     }
 }
 

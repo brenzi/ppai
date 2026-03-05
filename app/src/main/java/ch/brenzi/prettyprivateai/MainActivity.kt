@@ -1,5 +1,6 @@
 package ch.brenzi.prettyprivateai
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -37,6 +38,8 @@ import ch.brenzi.prettyprivateai.ui.theme.PrivatemodeTheme
 import ch.brenzi.prettyprivateai.ui.theme.Purple
 import ch.brenzi.prettyprivateai.ui.theme.TextSecondary
 import ch.brenzi.prettyprivateai.ui.theme.TextTertiary
+import ch.brenzi.prettyprivateai.tts.TtsModelState
+import ch.brenzi.prettyprivateai.tts.TtsVoice
 import ch.brenzi.prettyprivateai.whisper.WhisperModelSize
 import ch.brenzi.prettyprivateai.whisper.WhisperModelState
 import androidx.compose.material3.AlertDialog
@@ -57,6 +60,35 @@ class MainActivity : ComponentActivity() {
                 AppContent(app)
             }
         }
+
+        handleShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent) {
+        val app = application as PrivatemodeApp
+        when (intent.action) {
+            Intent.ACTION_SEND -> {
+                val stream = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                if (stream != null) {
+                    app.pendingShareContent.value = SharedContent.FileUri(stream, intent.type)
+                } else {
+                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    if (text != null) {
+                        app.pendingShareContent.value = SharedContent.Text(text)
+                    }
+                }
+            }
+            Intent.ACTION_VIEW -> {
+                intent.data?.let { uri ->
+                    app.pendingShareContent.value = SharedContent.Text(uri.toString())
+                }
+            }
+        }
     }
 }
 
@@ -70,6 +102,7 @@ private fun AppContent(app: PrivatemodeApp) {
 
     val proxyState by app.proxyManager.state.collectAsState()
     val sttEnabled by app.preferences.sttEnabled.collectAsState(initial = false)
+    val ttsEnabled by app.preferences.ttsEnabled.collectAsState(initial = false)
     val sttPromptShown by app.preferences.sttPromptShown.collectAsState(initial = true)
     var showSttDialog by remember { mutableStateOf(false) }
 
@@ -103,6 +136,18 @@ private fun AppContent(app: PrivatemodeApp) {
             app.whisperManager.initialize()
             if (app.whisperManager.modelState.value is WhisperModelState.NotDownloaded) {
                 app.whisperManager.downloadModel()
+            }
+        }
+    }
+
+    // Initialize TTS if enabled — no dependency on proxy/API
+    LaunchedEffect(ttsEnabled) {
+        if (ttsEnabled) {
+            val voiceName = app.preferences.ttsVoice.first()
+            app.ttsManager.setVoice(TtsVoice.fromString(voiceName))
+            app.ttsManager.initialize()
+            if (app.ttsManager.modelState.value is TtsModelState.NotDownloaded) {
+                app.ttsManager.downloadVoice()
             }
         }
     }
@@ -162,6 +207,7 @@ private fun AppContent(app: PrivatemodeApp) {
                 repository = app.repository,
                 proxyManager = app.proxyManager,
                 whisperManager = app.whisperManager,
+                ttsManager = app.ttsManager,
             )
         }
     }

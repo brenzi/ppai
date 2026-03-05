@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -90,6 +91,7 @@ import ch.brenzi.prettyprivateai.data.model.MODEL_CONFIG
 import ch.brenzi.prettyprivateai.data.model.Message
 import ch.brenzi.prettyprivateai.data.model.MessageRole
 import ch.brenzi.prettyprivateai.data.model.countWords
+import ch.brenzi.prettyprivateai.tts.TtsModelState
 import ch.brenzi.prettyprivateai.ui.theme.*
 import ch.brenzi.prettyprivateai.util.MarkdownRenderer
 import ch.brenzi.prettyprivateai.whisper.WhisperModelState
@@ -122,6 +124,9 @@ fun ChatScreen(
     val whisperModelState by viewModel.whisperModelState.collectAsState()
     val liveTranscription by viewModel.liveTranscription.collectAsState()
     val whisperLanguage by viewModel.whisperLanguage.collectAsState()
+    val ttsModelState by viewModel.ttsModelState.collectAsState()
+    val isSpeaking by viewModel.isSpeaking.collectAsState()
+    val speakingMessageId by viewModel.speakingMessageId.collectAsState()
 
     // Keep screen on while recording or transcribing
     if (isRecording || isTranscribing) {
@@ -198,7 +203,13 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(messages, key = { it.id }) { message ->
-                    MessageBubble(message = message)
+                    MessageBubble(
+                        message = message,
+                        ttsReady = ttsModelState is TtsModelState.Ready,
+                        isSpeaking = speakingMessageId == message.id,
+                        onSpeak = { viewModel.speakMessage(message.id, message.content) },
+                        onStopSpeaking = { viewModel.stopSpeaking() },
+                    )
                 }
             }
         }
@@ -240,6 +251,8 @@ fun ChatScreen(
             onWhisperLanguageChange = { viewModel.setWhisperLanguage(it) },
             onAttachAudio = { ctx, uri -> viewModel.attachAudioFile(ctx, uri) },
             onCancelTranscription = { viewModel.cancelTranscription() },
+            ttsReady = ttsModelState is TtsModelState.Ready,
+            onReadToMe = { viewModel.sendReadToMe() },
         )
     }
 
@@ -283,7 +296,13 @@ private fun EmptyState(hasChat: Boolean, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MessageBubble(message: Message) {
+private fun MessageBubble(
+    message: Message,
+    ttsReady: Boolean = false,
+    isSpeaking: Boolean = false,
+    onSpeak: () -> Unit = {},
+    onStopSpeaking: () -> Unit = {},
+) {
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     val isUser = message.role == MessageRole.USER
@@ -312,6 +331,20 @@ private fun MessageBubble(message: Message) {
                     color = TextSecondary,
                 )
                 Spacer(modifier = Modifier.weight(1f))
+                if (ttsReady && message.content.isNotEmpty()) {
+                    IconButton(
+                        onClick = { if (isSpeaking) onStopSpeaking() else onSpeak() },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isSpeaking) "Stop" else "Speak",
+                            modifier = Modifier.size(14.dp),
+                            tint = if (isSpeaking) Purple else TextTertiary,
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
                 IconButton(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(message.content))
@@ -394,6 +427,39 @@ private fun MessageBubble(message: Message) {
                 }
             }
         }
+
+        // User message actions (speak + copy)
+        if (isUser && message.content.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (ttsReady) {
+                    IconButton(
+                        onClick = { if (isSpeaking) onStopSpeaking() else onSpeak() },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isSpeaking) "Stop" else "Speak",
+                            modifier = Modifier.size(14.dp),
+                            tint = if (isSpeaking) Purple else TextTertiary,
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(message.content)) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        modifier = Modifier.size(14.dp),
+                        tint = TextTertiary,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -462,6 +528,8 @@ private fun ChatInputBar(
     onWhisperLanguageChange: (String) -> Unit = {},
     onAttachAudio: (context: android.content.Context, uri: android.net.Uri) -> Unit = { _, _ -> },
     onCancelTranscription: () -> Unit = {},
+    ttsReady: Boolean = false,
+    onReadToMe: () -> Unit = {},
 ) {
     val languageOptions = listOf("auto", "en", "de")
     val whisperModelReady = whisperModelState is WhisperModelState.Ready
@@ -579,6 +647,32 @@ private fun ChatInputBar(
                                         tint = TextTertiary,
                                     )
                                 }
+                            }
+                        }
+                    }
+                    if (ttsReady) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Purple.copy(alpha = 0.1f),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .clickable { onReadToMe() }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.VolumeUp,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Purple,
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Read to me",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Purple,
+                                )
                             }
                         }
                     }

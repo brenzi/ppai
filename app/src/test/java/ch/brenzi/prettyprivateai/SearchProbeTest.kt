@@ -4,6 +4,8 @@ import ch.brenzi.prettyprivateai.data.model.Chat
 import ch.brenzi.prettyprivateai.data.model.Message
 import ch.brenzi.prettyprivateai.data.model.MessageRole
 import ch.brenzi.prettyprivateai.data.repository.ChatRepository
+import ch.brenzi.prettyprivateai.tts.TtsManager
+import ch.brenzi.prettyprivateai.tts.TtsModelState
 import ch.brenzi.prettyprivateai.ui.chat.ChatViewModel
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
 import ch.brenzi.prettyprivateai.whisper.WhisperModelState
@@ -81,7 +83,7 @@ class SearchProbeTest {
     @Test
     fun `first message sends probe in system prompt`() {
         val repo = createMockRepo(modelResponse = "Normal answer.")
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("What are today's headlines?")
         vm.sendMessage()
@@ -99,7 +101,7 @@ class SearchProbeTest {
     @Test
     fun `system prompt still contains base prompt when probe appended`() {
         val repo = createMockRepo(modelResponse = "Answer.")
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("Test")
         vm.sendMessage()
@@ -116,7 +118,7 @@ class SearchProbeTest {
     @Test
     fun `system prompt includes current date and time`() {
         val repo = createMockRepo(modelResponse = "Answer.")
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("Test")
         vm.sendMessage()
@@ -137,7 +139,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = """[SEARCH: "latest world news"]""",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("What's happening in the world?")
         vm.sendMessage()
@@ -153,7 +155,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = "Let me look that up.\n[SEARCH: \"current headlines\"]\nSearching...",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("Today's headlines?")
         vm.sendMessage()
@@ -166,7 +168,7 @@ class SearchProbeTest {
     @Test
     fun `normal response does not trigger search dialog`() {
         val repo = createMockRepo(modelResponse = "2 + 2 = 4.")
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("What is 2+2?")
         vm.sendMessage()
@@ -180,7 +182,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = "I don't have access to real-time information. My training data has a cutoff.",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("What are today's headlines?")
         vm.sendMessage()
@@ -193,7 +195,7 @@ class SearchProbeTest {
     @Test
     fun `non-refusal normal response does not trigger fallback`() {
         val repo = createMockRepo(modelResponse = "2 + 2 = 4.")
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("What is 2+2?")
         vm.sendMessage()
@@ -206,7 +208,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = "I cannot access real-time data or browse the internet.",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("Latest news")
         vm.sendMessage()
@@ -220,7 +222,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = """[SEARCH: "test query"]""",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("Search test")
         vm.sendMessage()
@@ -236,7 +238,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = """[SEARCH: "query"]""",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         // First message: triggers approval
         vm.setMessageText("First question")
@@ -270,7 +272,7 @@ class SearchProbeTest {
         val repo = createMockRepo(
             modelResponse = """[SEARCH: "query"]""",
         )
-        val vm = ChatViewModel(repo, createMockWhisperManager())
+        val vm = ChatViewModel(repo, createMockWhisperManager(), createMockTtsManager())
 
         vm.setMessageText("Test")
         vm.sendMessage()
@@ -291,6 +293,13 @@ class SearchProbeTest {
         }
     }
 
+    private fun createMockTtsManager(): TtsManager {
+        return mockk {
+            every { modelState } returns MutableStateFlow<TtsModelState>(TtsModelState.NotDownloaded)
+            every { isReady() } returns false
+        }
+    }
+
     private fun createMockRepo(
         modelId: String = "openai/gpt-oss-120b",
         modelResponse: String = "Hello",
@@ -302,6 +311,7 @@ class SearchProbeTest {
             every { availableModels } returns MutableStateFlow(emptyList())
             every { selectedModel } returns flowOf(modelId)
             every { extendedThinking } returns flowOf(false)
+            every { whisperLanguage } returns flowOf("auto")
 
             coEvery { createChat() } returns "test-chat-1"
             every { setCurrentChatId(any()) } just Runs
