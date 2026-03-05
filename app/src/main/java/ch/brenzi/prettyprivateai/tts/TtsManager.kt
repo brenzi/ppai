@@ -31,22 +31,32 @@ sealed class TtsModelState {
 enum class TtsVoice(
     val label: String,
     val modelName: String,
+    val onnxFileName: String,
     val sizeMb: Int,
 ) {
     AMY(
-        label = "Amy (English)",
+        label = "Amy (EN)",
         modelName = "vits-piper-en_US-amy-low",
+        onnxFileName = "en_US-amy-low.onnx",
         sizeMb = 30,
     ),
     LESSAC(
-        label = "Lessac (English)",
+        label = "Lessac (EN)",
         modelName = "vits-piper-en_US-lessac-medium",
+        onnxFileName = "en_US-lessac-medium.onnx",
         sizeMb = 60,
     ),
     THORSTEN(
-        label = "Thorsten (German)",
+        label = "Thorsten (DE)",
         modelName = "vits-piper-de_DE-thorsten-medium",
+        onnxFileName = "de_DE-thorsten-medium.onnx",
         sizeMb = 60,
+    ),
+    KERSTIN(
+        label = "Kerstin (DE)",
+        modelName = "vits-piper-de_DE-kerstin-low",
+        onnxFileName = "de_DE-kerstin-low.onnx",
+        sizeMb = 63,
     );
 
     companion object {
@@ -99,14 +109,23 @@ class TtsManager(private val context: Context) {
         modelMutex.withLock {
             if (_modelState.value is TtsModelState.Ready) return@withContext
 
+            Log.i(TAG, "initialize() voice=${voice.modelName}")
             extractEspeakData()
 
-            if (!modelFile().exists() || !tokensFile().exists()) {
+            val modelExists = modelFile().exists()
+            val tokensExists = tokensFile().exists()
+            val espeakReady = espeakDataReady()
+            Log.i(TAG, "Files: model=$modelExists (${modelFile().absolutePath}), " +
+                    "tokens=$tokensExists, espeakReady=$espeakReady")
+
+            if (!modelExists || !tokensExists || !espeakReady) {
+                Log.i(TAG, "Model files missing, staying NotDownloaded")
                 _modelState.value = TtsModelState.NotDownloaded
                 return@withContext
             }
 
             try {
+                Log.i(TAG, "Creating OfflineTts config...")
                 val vitsConfig = OfflineTtsVitsModelConfig.builder()
                     .setModel(modelFile().absolutePath)
                     .setTokens(tokensFile().absolutePath)
@@ -116,7 +135,7 @@ class TtsManager(private val context: Context) {
                 val modelConfig = OfflineTtsModelConfig.builder()
                     .setVits(vitsConfig)
                     .setNumThreads(2)
-                    .setDebug(false)
+                    .setDebug(true)
                     .setProvider("cpu")
                     .build()
 
@@ -124,12 +143,14 @@ class TtsManager(private val context: Context) {
                     .setModel(modelConfig)
                     .build()
 
+                Log.i(TAG, "Creating OfflineTts instance...")
                 tts = OfflineTts(config)
                 _modelState.value = TtsModelState.Ready
-                Log.i(TAG, "TTS engine initialized: ${voice.modelName}, sampleRate=${tts?.sampleRate}")
+                Log.i(TAG, "TTS engine initialized: ${voice.modelName}, " +
+                        "sampleRate=${tts?.sampleRate}, speakers=${tts?.numSpeakers}")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize TTS engine", e)
-                _modelState.value = TtsModelState.Error("Failed to load TTS model")
+                _modelState.value = TtsModelState.Error("Failed to load TTS model: ${e.message}")
             }
         }
     }
@@ -142,14 +163,15 @@ class TtsManager(private val context: Context) {
             val dir = voiceDir()
             if (!dir.exists()) dir.mkdirs()
 
+            val totalSize = voice.sizeMb * 1_048_576L
+            var totalDownloaded = 0L
+
             val baseUrl = "https://huggingface.co/csukuangfj/${voice.modelName}/resolve/main"
             val files = listOf(
-                "${voice.modelName}.onnx" to modelFile(),
+                voice.onnxFileName to modelFile(),
                 "tokens.txt" to tokensFile(),
             )
 
-            val totalSize = voice.sizeMb * 1_048_576L
-            var totalDownloaded = 0L
             val maxRetries = 5
 
             for ((remoteName, localFile) in files) {
@@ -223,8 +245,14 @@ class TtsManager(private val context: Context) {
     }
 
     fun synthesize(text: String, speakerId: Int = 0, speed: Float = 1.0f): GeneratedAudio? {
-        val engine = tts ?: return null
-        return engine.generate(text, speakerId, speed)
+        val engine = tts ?: run {
+            Log.w(TAG, "synthesize() called but engine is null")
+            return null
+        }
+        Log.i(TAG, "synthesize(): ${text.length} chars, sid=$speakerId, speed=$speed")
+        val audio = engine.generate(text, speakerId, speed)
+        Log.i(TAG, "synthesize() done: ${audio.samples.size} samples, rate=${audio.sampleRate}")
+        return audio
     }
 
     fun deleteVoice() {
@@ -242,14 +270,26 @@ class TtsManager(private val context: Context) {
 
     fun getSampleRate(): Int = tts?.sampleRate ?: 22050
 
-    private fun extractEspeakData() {
-        val dest = espeakDataDir()
-        if (dest.exists() && dest.list()?.isNotEmpty() == true) return
+    /** espeak-ng-data is ready when phontab exists (the key compiled binary file). */
+    private fun espeakDataReady(): Boolean =
+        File(espeakDataDir(), "phontab").exists()
 
-        Log.i(TAG, "Extracting espeak-ng-data from assets")
+    /** Extract espeak-ng-data from APK assets to filesDir (one-time). */
+    private fun extractEspeakData() {
+        if (espeakDataReady()) {
+            Log.i(TAG, "espeak-ng-data already extracted at ${espeakDataDir().absolutePath}")
+            return
+        }
+
+        Log.i(TAG, "Extracting espeak-ng-data from assets...")
         try {
+            val assetEntries = context.assets.list(ESPEAK_DIR) ?: emptyArray()
+            Log.i(TAG, "Asset entries in $ESPEAK_DIR: ${assetEntries.size} (${assetEntries.take(5).joinToString()})")
+            val dest = espeakDataDir()
             copyAssetDir(context.assets, ESPEAK_DIR, dest)
-            Log.i(TAG, "espeak-ng-data extracted to ${dest.absolutePath}")
+            val extracted = dest.list() ?: emptyArray()
+            Log.i(TAG, "espeak-ng-data extracted: ${extracted.size} entries, " +
+                    "phontab=${File(dest, "phontab").exists()}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to extract espeak-ng-data", e)
         }

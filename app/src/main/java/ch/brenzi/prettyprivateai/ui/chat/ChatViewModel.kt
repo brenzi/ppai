@@ -928,18 +928,20 @@ If you can answer from your existing knowledge, answer normally without using th
     }
 
     fun speakMessage(messageId: String, text: String) {
+        Log.i(TAG, "speakMessage: ttsReady=${ttsManager.isReady()}, isSpeaking=${_isSpeaking.value}, textLen=${text.length}")
         if (!ttsManager.isReady() || _isSpeaking.value) return
         _isSpeaking.value = true
         _speakingMessageId.value = messageId
 
         speakJob = viewModelScope.launch {
             try {
+                Log.i(TAG, "Starting TTS synthesis...")
                 val audio = withContext(Dispatchers.Default) {
                     ttsManager.synthesize(text)
                 }
+                Log.i(TAG, "TTS synthesis result: ${audio?.samples?.size ?: "null"} samples")
                 if (audio != null && audio.samples.isNotEmpty()) {
                     audioPlayer.play(audio.samples, audio.sampleRate)
-                    // Poll until playback finishes
                     while (audioPlayer.isPlaying()) {
                         delay(200)
                     }

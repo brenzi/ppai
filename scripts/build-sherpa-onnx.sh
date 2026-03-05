@@ -94,6 +94,16 @@ for abi in arm64-v8a x86_64; do
     export SHERPA_ONNXRUNTIME_LIB_DIR="$ORT_LIB"
     export SHERPA_ONNXRUNTIME_INCLUDE_DIR="$ORT_INCLUDE"
 
+    # Wipe stale CMake cache if source dir changed (e.g. different checkout path)
+    if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+        cached_src=$(grep -m1 'CMAKE_HOME_DIRECTORY:INTERNAL=' "$BUILD_DIR/CMakeCache.txt" | cut -d= -f2)
+        if [ -n "$cached_src" ] && [ "$cached_src" != "$SHERPA_SRC" ]; then
+            echo "CMake cache points to $cached_src, wiping stale build dir"
+            rm -rf "$BUILD_DIR"
+            mkdir -p "$BUILD_DIR"
+        fi
+    fi
+
     cmake -S "$SHERPA_SRC" -B "$BUILD_DIR" \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
         -DANDROID_ABI="$abi" \
@@ -128,19 +138,50 @@ for abi in arm64-v8a x86_64; do
     echo "Built sherpa-onnx for $abi"
 done
 
-# Extract espeak-ng-data to assets (shared across ABIs — use the first build dir)
-FIRST_BUILD="$BUILD_BASE/arm64-v8a"
-ESPEAK_DATA_SRC=$(find "$FIRST_BUILD" -type d -name "espeak-ng-data" | head -1)
+# Build espeak-ng-data from source.
+# The cross-compile can't run host tools, so we build espeak-ng natively for the
+# host first to compile phoneme data (phontab, phondata, phonindex, intonations).
+# Uses the espeak-ng source fetched by CMake during the Android build above.
+ESPEAK_DEST="$ASSETS_DIR/sherpa-onnx-espeak-ng-data"
+if [ ! -f "$ESPEAK_DEST/phontab" ]; then
+    FIRST_BUILD="$BUILD_BASE/arm64-v8a"
+    ESPEAK_SRC="$FIRST_BUILD/_deps/espeak_ng-src"
+    if [ ! -d "$ESPEAK_SRC" ]; then
+        echo "ERROR: espeak-ng source not found at $ESPEAK_SRC"
+        exit 1
+    fi
 
-if [ -n "$ESPEAK_DATA_SRC" ]; then
-    mkdir -p "$ASSETS_DIR"
-    ESPEAK_DEST="$ASSETS_DIR/sherpa-onnx-espeak-ng-data"
+    echo ""
+    echo "========================================="
+    echo "Building espeak-ng-data from source (host)"
+    echo "========================================="
+
+    HOST_BUILD="$BUILD_BASE/espeak-ng-host"
+    mkdir -p "$HOST_BUILD"
+
+    cmake -S "$ESPEAK_SRC" -B "$HOST_BUILD" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_ESPEAK_NG_EXE=ON \
+        -DBUILD_ESPEAK_NG_TESTS=OFF \
+        -DBUILD_SHARED_LIBS=OFF
+
+    cmake --build "$HOST_BUILD" --parallel "$NCPU"
+
+    # The compiled data lands in <build>/_deps/espeak_ng-src/espeak-ng-data/
+    # or in the build dir itself — find phontab
+    ESPEAK_DATA_SRC=$(find "$HOST_BUILD" -name "phontab" -type f | head -1)
+    if [ -z "$ESPEAK_DATA_SRC" ]; then
+        echo "ERROR: phontab not found after host build of espeak-ng"
+        exit 1
+    fi
+    ESPEAK_DATA_DIR=$(dirname "$ESPEAK_DATA_SRC")
+
+    mkdir -p "$ESPEAK_DEST"
     rm -rf "$ESPEAK_DEST"
-    cp -r "$ESPEAK_DATA_SRC" "$ESPEAK_DEST"
-    echo "Copied espeak-ng-data to $ESPEAK_DEST"
+    cp -r "$ESPEAK_DATA_DIR" "$ESPEAK_DEST"
+    echo "espeak-ng-data built and copied to $ESPEAK_DEST ($(ls "$ESPEAK_DEST" | wc -l) entries)"
 else
-    echo "WARNING: espeak-ng-data not found in build output."
-    echo "TTS will require espeak-ng-data to be placed in assets manually."
+    echo "espeak-ng-data already present at $ESPEAK_DEST"
 fi
 
 echo ""
