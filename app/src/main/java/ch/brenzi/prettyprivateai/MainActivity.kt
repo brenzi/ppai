@@ -1,5 +1,6 @@
 package ch.brenzi.prettyprivateai
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -57,6 +58,35 @@ class MainActivity : ComponentActivity() {
         setContent {
             PrivatemodeTheme {
                 AppContent(app)
+            }
+        }
+
+        handleShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent) {
+        val app = application as PrivatemodeApp
+        when (intent.action) {
+            Intent.ACTION_SEND -> {
+                val stream = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                if (stream != null) {
+                    app.pendingShareContent.value = SharedContent.FileUri(stream, intent.type)
+                } else {
+                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    if (text != null) {
+                        app.pendingShareContent.value = SharedContent.Text(text)
+                    }
+                }
+            }
+            Intent.ACTION_VIEW -> {
+                intent.data?.let { uri ->
+                    app.pendingShareContent.value = SharedContent.Text(uri.toString())
+                }
             }
         }
     }

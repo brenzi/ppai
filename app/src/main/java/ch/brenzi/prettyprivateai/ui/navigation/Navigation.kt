@@ -9,14 +9,17 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import ch.brenzi.prettyprivateai.PrivatemodeApp
 import ch.brenzi.prettyprivateai.data.repository.ChatRepository
 import ch.brenzi.prettyprivateai.proxy.ProxyManager
 import ch.brenzi.prettyprivateai.tts.TtsManager
@@ -52,6 +55,22 @@ fun MainNavigation(
     val chats by chatViewModel.chats.collectAsState()
     val currentChatId by chatViewModel.currentChatId.collectAsState()
     val modelsLoaded by chatViewModel.modelsLoaded.collectAsState()
+
+    // Handle shared content from other apps
+    val context = LocalContext.current
+    val app = context.applicationContext as PrivatemodeApp
+    val pendingShare by app.pendingShareContent.collectAsState()
+    LaunchedEffect(pendingShare) {
+        val content = pendingShare ?: return@LaunchedEffect
+        // Navigate to chat if not already there
+        if (navController.currentDestination?.route != Screen.Chat.route) {
+            navController.navigate(Screen.Chat.route) {
+                popUpTo(Screen.Chat.route) { inclusive = true }
+            }
+        }
+        chatViewModel.handleSharedContent(context, content)
+        app.pendingShareContent.value = null
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,

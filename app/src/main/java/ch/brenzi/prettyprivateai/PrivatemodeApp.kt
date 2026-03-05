@@ -7,6 +7,13 @@ import ch.brenzi.prettyprivateai.data.repository.ChatRepository
 import ch.brenzi.prettyprivateai.proxy.ProxyManager
 import ch.brenzi.prettyprivateai.tts.TtsManager
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
+import android.net.Uri
+import kotlinx.coroutines.flow.MutableStateFlow
+
+sealed class SharedContent {
+    data class Text(val text: String) : SharedContent()
+    data class FileUri(val uri: Uri, val mimeType: String?) : SharedContent()
+}
 
 class PrivatemodeApp : Application() {
 
@@ -22,6 +29,8 @@ class PrivatemodeApp : Application() {
         private set
     lateinit var ttsManager: TtsManager
         private set
+
+    val pendingShareContent = MutableStateFlow<SharedContent?>(null)
 
     override fun onCreate() {
         super.onCreate()

@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import ch.brenzi.prettyprivateai.SharedContent
 import ch.brenzi.prettyprivateai.data.model.ApiModel
 import ch.brenzi.prettyprivateai.data.model.AttachedFile
 import ch.brenzi.prettyprivateai.data.model.Chat
@@ -119,6 +120,8 @@ class ChatViewModel(
 
     private val _speakingMessageId = MutableStateFlow<String?>(null)
     val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
+
+    private var _autoSpeakNext = false
 
     private val _liveTranscription = MutableStateFlow("")
     val liveTranscription: StateFlow<String> = _liveTranscription.asStateFlow()
@@ -265,6 +268,52 @@ If you can answer from your existing knowledge, answer normally without using th
         _attachedFiles.value = _attachedFiles.value.filterIndexed { i, _ -> i != index }
     }
 
+    fun handleSharedContent(context: Context, content: SharedContent) {
+        // Create a new chat if none exists
+        viewModelScope.launch {
+            if (currentChatId.value == null) {
+                val chatId = repository.createChat()
+                repository.setCurrentChatId(chatId)
+            }
+        }
+        when (content) {
+            is SharedContent.Text -> {
+                if (content.text.startsWith("http://") || content.text.startsWith("https://")) {
+                    _attachedFiles.value = _attachedFiles.value + AttachedFile(
+                        name = content.text.take(80),
+                        content = content.text,
+                    )
+                } else {
+                    _messageText.value = content.text
+                }
+            }
+            is SharedContent.FileUri -> {
+                val mime = content.mimeType ?: ""
+                when {
+                    mime.startsWith("image/") -> {
+                        attachImage(context, content.uri)
+                    }
+                    mime.startsWith("audio/") -> {
+                        attachAudioFile(context, content.uri)
+                    }
+                    else -> {
+                        uploadFile(context, content.uri)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun ensureImageModel() {
+        val current = _selectedModel.value ?: return
+        if (MODEL_CONFIG[current]?.supportsImageInput == true) return
+        val imageModel = MODEL_CONFIG.entries.firstOrNull { it.value.supportsImageInput }
+        if (imageModel != null) {
+            Log.i(TAG, "Auto-switching to image model: ${imageModel.key}")
+            selectModel(imageModel.key)
+        }
+    }
+
     fun uploadFile(context: Context, uri: Uri) {
         viewModelScope.launch {
             _isUploading.value = true
@@ -331,6 +380,7 @@ If you can answer from your existing knowledge, answer normally without using th
                     imageBase64 = base64,
                     mimeType = "image/jpeg",
                 )
+                ensureImageModel()
             } catch (e: Exception) {
                 throw e
             } finally {
@@ -552,6 +602,12 @@ If you can answer from your existing knowledge, answer normally without using th
         }
     }
 
+    fun sendReadToMe() {
+        _messageText.value = "Read this to me. Extract only the main readable content — strip navigation, ads, boilerplate, metadata. Present clean flowing text."
+        _autoSpeakNext = true
+        sendMessage()
+    }
+
     fun sendMessage() {
         val model = _selectedModel.value ?: return
         val text = _messageText.value.trim()
@@ -720,6 +776,14 @@ If you can answer from your existing knowledge, answer normally without using th
                         repository.saveAfterStreaming()
                         _isGenerating.value = false
                         streamingJob = null
+                        if (_autoSpeakNext) {
+                            _autoSpeakNext = false
+                            val msg = repository.getChat(chatId)?.messages
+                                ?.find { it.id == assistantMessageId }
+                            if (msg != null && msg.content.isNotBlank()) {
+                                speakMessage(msg.id, msg.content)
+                            }
+                        }
                     }
                 }
             }
@@ -812,6 +876,14 @@ If you can answer from your existing knowledge, answer normally without using th
                 repository.saveAfterStreaming()
                 _isGenerating.value = false
                 streamingJob = null
+                if (_autoSpeakNext) {
+                    _autoSpeakNext = false
+                    val msg = repository.getChat(pending.chatId)?.messages
+                        ?.find { it.id == pending.assistantMessageId }
+                    if (msg != null && msg.content.isNotBlank()) {
+                        speakMessage(msg.id, msg.content)
+                    }
+                }
             }
         }
     }
@@ -842,6 +914,14 @@ If you can answer from your existing knowledge, answer normally without using th
                 repository.saveAfterStreaming()
                 _isGenerating.value = false
                 streamingJob = null
+                if (_autoSpeakNext) {
+                    _autoSpeakNext = false
+                    val msg = repository.getChat(pending.chatId)?.messages
+                        ?.find { it.id == pending.assistantMessageId }
+                    if (msg != null && msg.content.isNotBlank()) {
+                        speakMessage(msg.id, msg.content)
+                    }
+                }
             }
         }
     }

@@ -251,6 +251,8 @@ fun ChatScreen(
             onWhisperLanguageChange = { viewModel.setWhisperLanguage(it) },
             onAttachAudio = { ctx, uri -> viewModel.attachAudioFile(ctx, uri) },
             onCancelTranscription = { viewModel.cancelTranscription() },
+            ttsReady = ttsModelState is TtsModelState.Ready,
+            onReadToMe = { viewModel.sendReadToMe() },
         )
     }
 
@@ -425,6 +427,39 @@ private fun MessageBubble(
                 }
             }
         }
+
+        // User message actions (speak + copy)
+        if (isUser && message.content.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (ttsReady) {
+                    IconButton(
+                        onClick = { if (isSpeaking) onStopSpeaking() else onSpeak() },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isSpeaking) "Stop" else "Speak",
+                            modifier = Modifier.size(14.dp),
+                            tint = if (isSpeaking) Purple else TextTertiary,
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = { clipboardManager.setText(AnnotatedString(message.content)) },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        modifier = Modifier.size(14.dp),
+                        tint = TextTertiary,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -493,6 +528,8 @@ private fun ChatInputBar(
     onWhisperLanguageChange: (String) -> Unit = {},
     onAttachAudio: (context: android.content.Context, uri: android.net.Uri) -> Unit = { _, _ -> },
     onCancelTranscription: () -> Unit = {},
+    ttsReady: Boolean = false,
+    onReadToMe: () -> Unit = {},
 ) {
     val languageOptions = listOf("auto", "en", "de")
     val whisperModelReady = whisperModelState is WhisperModelState.Ready
@@ -610,6 +647,32 @@ private fun ChatInputBar(
                                         tint = TextTertiary,
                                     )
                                 }
+                            }
+                        }
+                    }
+                    if (ttsReady) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Purple.copy(alpha = 0.1f),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .clickable { onReadToMe() }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.VolumeUp,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = Purple,
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    "Read to me",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Purple,
+                                )
                             }
                         }
                     }
