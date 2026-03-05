@@ -79,7 +79,8 @@ Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeInit(
 
 JNIEXPORT jstring JNICALL
 Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeTranscribe(
-    JNIEnv *env, jobject thiz, jfloatArray samples, jint n_threads, jstring language) {
+    JNIEnv *env, jobject thiz, jfloatArray samples, jint n_threads, jstring language,
+    jstring prompt) {
 
     if (ctx == NULL) {
         __android_log_print(ANDROID_LOG_ERROR, TAG, "transcribe called but context is NULL");
@@ -93,11 +94,13 @@ Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeTranscribe(
     jsize n_samples = (*env)->GetArrayLength(env, samples);
     jfloat *data = (*env)->GetFloatArrayElements(env, samples, NULL);
     const char *lang = (*env)->GetStringUTFChars(env, language, NULL);
+    const char *prompt_str = prompt ? (*env)->GetStringUTFChars(env, prompt, NULL) : NULL;
 
     int threads = n_threads > 0 ? n_threads : 2;
     __android_log_print(ANDROID_LOG_INFO, TAG,
-        "whisper_full: %d samples (%.1fs audio), %d threads, lang=%s",
-        n_samples, (float)n_samples / 16000.0f, threads, lang);
+        "whisper_full: %d samples (%.1fs audio), %d threads, lang=%s, prompt=%d chars",
+        n_samples, (float)n_samples / 16000.0f, threads, lang,
+        prompt_str ? (int)strlen(prompt_str) : 0);
 
     struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.language = lang;
@@ -114,6 +117,11 @@ Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeTranscribe(
     params.progress_callback = on_progress;
     params.progress_callback_user_data = NULL;
 
+    /* Feed previous transcription as context for coherent chunked transcription. */
+    if (prompt_str && prompt_str[0] != '\0') {
+        params.initial_prompt = prompt_str;
+    }
+
     /* Scale audio_ctx to actual recording length instead of default 1500 (30s).
      * Whisper uses 50 mel frames/second, so n_samples/16000*50 = n_samples/320.
      * Add 10% headroom and clamp to [64, 1500]. */
@@ -126,6 +134,7 @@ Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeTranscribe(
     int ret = whisper_full(ctx, params, data, n_samples);
     (*env)->ReleaseFloatArrayElements(env, samples, data, JNI_ABORT);
     (*env)->ReleaseStringUTFChars(env, language, lang);
+    if (prompt_str) (*env)->ReleaseStringUTFChars(env, prompt, prompt_str);
 
     if (atomic_load(&abort_flag) != 0) {
         __android_log_print(ANDROID_LOG_INFO, TAG, "whisper_full aborted by caller");

@@ -414,7 +414,8 @@ If you can answer from your existing knowledge, answer normally without using th
                             .coerceIn(0, 100)
                         Log.i(TAG, "Transcribing file chunk ${chunkIndex+1}/$estTotal (${chunk.size / 16000f}s) $pct%")
                         _statusMessage.value = "Transcribing ${chunkIndex + 1}/$estTotal ($pct%)"
-                        val text = whisperManager.transcribe(chunk, language)
+                        val prompt = committed.toString().ifEmpty { null }
+                        val text = whisperManager.transcribe(chunk, language, prompt)
                         if (text.isNotBlank()) {
                             if (committed.isEmpty()) {
                                 committed.append(text.trim())
@@ -513,9 +514,10 @@ If you can answer from your existing knowledge, answer normally without using th
                 val tailSamples = recorder.getSamplesRange(pipelineTranscribedUpTo, total)
 
                 if (tailSamples.size >= MIN_TAIL_SAMPLES) {
+                    val tailPrompt = pipelineCommitted.toString().ifEmpty { null }
                     val text = withContext(Dispatchers.Default) {
                         withTimeout(TRANSCRIPTION_TIMEOUT_MS) {
-                            whisperManager.transcribe(tailSamples, _whisperLanguage.value)
+                            whisperManager.transcribe(tailSamples, _whisperLanguage.value, tailPrompt)
                         }
                     }
                     if (text.isNotBlank()) {
@@ -586,7 +588,8 @@ If you can answer from your existing knowledge, answer normally without using th
             val samples = recorder.getSamplesRange(pipelineTranscribedUpTo, chunkEnd)
 
             try {
-                val text = whisperManager.transcribe(samples, _whisperLanguage.value)
+                val prompt = pipelineCommitted.toString().ifEmpty { null }
+                val text = whisperManager.transcribe(samples, _whisperLanguage.value, prompt)
                 if (text.isNotBlank()) {
                     if (pipelineCommitted.isEmpty()) {
                         pipelineCommitted.append(text.trim())

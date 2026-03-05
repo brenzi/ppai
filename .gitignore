@@ -10,6 +10,9 @@ app/src/main/jniLibs/
 # sherpa-onnx CMake build tree (rebuilt from source)
 build-sherpa-onnx/
 
+# whisper.cpp host build tree (from test-whisper-quality.sh)
+build-whisper-test/
+
 # espeak-ng-data (extracted at build time by build-sherpa-onnx.sh)
 app/src/main/assets/sherpa-onnx-espeak-ng-data/
 
