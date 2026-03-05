@@ -4,8 +4,14 @@ app/.cxx/
 build/
 .gradle/
 
-# Prebuilt native libs (rebuilt from source via build-native.sh)
+# Prebuilt native libs (rebuilt from source via build-native.sh / build-sherpa-onnx.sh)
 app/src/main/jniLibs/
+
+# sherpa-onnx CMake build tree (rebuilt from source)
+build-sherpa-onnx/
+
+# espeak-ng-data (extracted at build time by build-sherpa-onnx.sh)
+app/src/main/assets/sherpa-onnx-espeak-ng-data/
 
 # whisper.cpp (external dependency, not part of this repo)
 whisper.cpp/

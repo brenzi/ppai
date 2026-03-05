@@ -62,6 +62,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.platform.LocalUriHandler
+import ch.brenzi.prettyprivateai.tts.TtsModelState
+import ch.brenzi.prettyprivateai.tts.TtsVoice
 import ch.brenzi.prettyprivateai.ui.theme.*
 import ch.brenzi.prettyprivateai.whisper.WhisperModelSize
 import ch.brenzi.prettyprivateai.whisper.WhisperModelState
@@ -77,6 +79,9 @@ fun SettingsScreen(
     val sttEnabled by viewModel.sttEnabled.collectAsState()
     val sttModelSize by viewModel.sttModelSize.collectAsState()
     val whisperModelState by viewModel.whisperModelState.collectAsState()
+    val ttsEnabled by viewModel.ttsEnabled.collectAsState()
+    val ttsVoice by viewModel.ttsVoice.collectAsState()
+    val ttsModelState by viewModel.ttsModelState.collectAsState()
 
     var editApiKey by remember(apiKey) { mutableStateOf(apiKey ?: "") }
     var showApiKey by remember { mutableStateOf(false) }
@@ -357,6 +362,128 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedButton(
                                     onClick = { viewModel.downloadWhisperModel() },
+                                    shape = RoundedCornerShape(8.dp),
+                                ) {
+                                    Text("Retry")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Text to speech
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Text to speech",
+                            style = MaterialTheme.typography.headlineMedium,
+                        )
+                        Switch(
+                            checked = ttsEnabled,
+                            onCheckedChange = { viewModel.setTtsEnabled(it) },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Purple),
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "On-device speech synthesis using Piper",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                    )
+
+                    if (ttsEnabled) {
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Text(
+                            text = "Voice",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.W500,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TtsVoice.entries.forEach { voice ->
+                                val selected = voice == ttsVoice
+                                OutlinedButton(
+                                    onClick = { if (!selected) viewModel.setTtsVoice(voice) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (selected) Purple else SurfaceWhite,
+                                        contentColor = if (selected) SurfaceWhite else TextPrimary,
+                                    ),
+                                    border = ButtonDefaults.outlinedButtonBorder(true).copy(
+                                        brush = androidx.compose.ui.graphics.SolidColor(
+                                            if (selected) Purple else BorderInput
+                                        ),
+                                    ),
+                                ) {
+                                    Text("${voice.label} (~${voice.sizeMb} MB)")
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        when (val state = ttsModelState) {
+                            is TtsModelState.NotDownloaded -> {
+                                Button(
+                                    onClick = { viewModel.downloadTtsModel() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Purple),
+                                    shape = RoundedCornerShape(8.dp),
+                                ) {
+                                    Text("Download voice")
+                                }
+                            }
+                            is TtsModelState.Downloading -> {
+                                LinearProgressIndicator(
+                                    progress = { state.progress },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Purple,
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Downloading... ${(state.progress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextTertiary,
+                                )
+                            }
+                            is TtsModelState.Ready -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = SecurityGreen,
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Voice ready",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SecurityGreen,
+                                    )
+                                }
+                            }
+                            is TtsModelState.Error -> {
+                                Text(
+                                    text = state.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ErrorRed,
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { viewModel.downloadTtsModel() },
                                     shape = RoundedCornerShape(8.dp),
                                 ) {
                                     Text("Retry")

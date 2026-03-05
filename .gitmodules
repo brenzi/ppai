@@ -1,3 +1,6 @@
 [submodule "privatemode-public"]
 	path = privatemode-public
 	url = https://github.com/edgelesssys/privatemode-public.git
+[submodule "sherpa-onnx"]
+	path = sherpa-onnx
+	url = https://github.com/k2-fsa/sherpa-onnx.git

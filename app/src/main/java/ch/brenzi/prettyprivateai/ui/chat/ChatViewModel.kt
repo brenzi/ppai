@@ -19,6 +19,9 @@ import ch.brenzi.prettyprivateai.data.model.countWords
 import ch.brenzi.prettyprivateai.data.remote.ApiException
 import ch.brenzi.prettyprivateai.data.remote.StartpageSearchClient
 import ch.brenzi.prettyprivateai.data.repository.ChatRepository
+import ch.brenzi.prettyprivateai.tts.AudioPlayer
+import ch.brenzi.prettyprivateai.tts.TtsManager
+import ch.brenzi.prettyprivateai.tts.TtsModelState
 import ch.brenzi.prettyprivateai.whisper.AudioDecoder
 import ch.brenzi.prettyprivateai.whisper.AudioRecorder
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
@@ -61,6 +64,7 @@ data class PendingSearchApproval(
 class ChatViewModel(
     private val repository: ChatRepository,
     private val whisperManager: WhisperManager,
+    private val ttsManager: TtsManager,
 ) : ViewModel() {
     private val TAG = "ChatViewModel"
 
@@ -103,6 +107,18 @@ class ChatViewModel(
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
     val whisperModelState: StateFlow<WhisperModelState> = whisperManager.modelState
+
+    // TTS
+    private val audioPlayer = AudioPlayer()
+    private var speakJob: Job? = null
+
+    val ttsModelState: StateFlow<TtsModelState> = ttsManager.modelState
+
+    private val _isSpeaking = MutableStateFlow(false)
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
+
+    private val _speakingMessageId = MutableStateFlow<String?>(null)
+    val speakingMessageId: StateFlow<String?> = _speakingMessageId.asStateFlow()
 
     private val _liveTranscription = MutableStateFlow("")
     val liveTranscription: StateFlow<String> = _liveTranscription.asStateFlow()
@@ -911,13 +927,50 @@ If you can answer from your existing knowledge, answer normally without using th
         return name
     }
 
+    fun speakMessage(messageId: String, text: String) {
+        if (!ttsManager.isReady() || _isSpeaking.value) return
+        _isSpeaking.value = true
+        _speakingMessageId.value = messageId
+
+        speakJob = viewModelScope.launch {
+            try {
+                val audio = withContext(Dispatchers.Default) {
+                    ttsManager.synthesize(text)
+                }
+                if (audio != null && audio.samples.isNotEmpty()) {
+                    audioPlayer.play(audio.samples, audio.sampleRate)
+                    // Poll until playback finishes
+                    while (audioPlayer.isPlaying()) {
+                        delay(200)
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                audioPlayer.stop()
+            } catch (e: Exception) {
+                Log.e(TAG, "TTS synthesis/playback failed", e)
+            } finally {
+                _isSpeaking.value = false
+                _speakingMessageId.value = null
+            }
+        }
+    }
+
+    fun stopSpeaking() {
+        speakJob?.cancel()
+        speakJob = null
+        audioPlayer.stop()
+        _isSpeaking.value = false
+        _speakingMessageId.value = null
+    }
+
     class Factory(
         private val repository: ChatRepository,
         private val whisperManager: WhisperManager,
+        private val ttsManager: TtsManager,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ChatViewModel(repository, whisperManager) as T
+            return ChatViewModel(repository, whisperManager, ttsManager) as T
         }
     }
 }

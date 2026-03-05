@@ -4,6 +4,8 @@ import ch.brenzi.prettyprivateai.data.model.Chat
 import ch.brenzi.prettyprivateai.data.model.Message
 import ch.brenzi.prettyprivateai.data.model.MessageRole
 import ch.brenzi.prettyprivateai.data.repository.ChatRepository
+import ch.brenzi.prettyprivateai.tts.TtsManager
+import ch.brenzi.prettyprivateai.tts.TtsModelState
 import ch.brenzi.prettyprivateai.ui.chat.ChatViewModel
 import ch.brenzi.prettyprivateai.whisper.AudioRecorder
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
@@ -80,7 +82,7 @@ class WhisperTranscriptionTest {
     fun `startRecording does nothing when whisper not ready`() {
         val whisperManager = createMockWhisperManager(ready = false)
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         val context = mockk<android.content.Context>()
         vm.startRecording(context)
@@ -92,7 +94,7 @@ class WhisperTranscriptionTest {
     fun `startRecording does nothing when already recording`() {
         val whisperManager = createMockWhisperManager(ready = true)
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         // Simulate already recording
         val context = mockk<android.content.Context>()
@@ -106,7 +108,7 @@ class WhisperTranscriptionTest {
     fun `stopRecording when not recording is a no-op`() {
         val whisperManager = createMockWhisperManager(ready = true)
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         // Should not throw
         vm.stopRecording()
@@ -121,7 +123,7 @@ class WhisperTranscriptionTest {
         every { whisperManager.transcribe(any(), any()) } returns "Hello world"
 
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         // Simulate the transcription path directly via stopRecording internals
         // Since we can't fully mock AudioRecord, test the ViewModel's text handling
@@ -144,7 +146,7 @@ class WhisperTranscriptionTest {
     fun `empty transcription does not modify message text`() = runTest {
         val whisperManager = createMockWhisperManager(ready = true)
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         vm.setMessageText("existing")
 
@@ -195,7 +197,7 @@ class WhisperTranscriptionTest {
             every { isReady() } returns false
         }
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         val state = vm.whisperModelState.value
         assertTrue(state is WhisperModelState.Downloading)
@@ -210,7 +212,7 @@ class WhisperTranscriptionTest {
             every { isReady() } returns false
         }
         val repo = createMockRepo()
-        val vm = ChatViewModel(repo, whisperManager)
+        val vm = ChatViewModel(repo, whisperManager, createMockTtsManager())
 
         val state = vm.whisperModelState.value
         assertTrue(state is WhisperModelState.Error)
@@ -243,6 +245,14 @@ class WhisperTranscriptionTest {
             every { isReady() } returns ready
             every { transcribe(any(), any()) } returns ""
             every { abortTranscription() } just Runs
+        }
+    }
+
+    private fun createMockTtsManager(): TtsManager {
+        return mockk {
+            every { modelState } returns MutableStateFlow<TtsModelState>(TtsModelState.NotDownloaded)
+            every { isReady() } returns false
+            every { synthesize(any(), any(), any()) } returns null
         }
     }
 

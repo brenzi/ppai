@@ -19,6 +19,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import ch.brenzi.prettyprivateai.data.repository.ChatRepository
 import ch.brenzi.prettyprivateai.proxy.ProxyManager
+import ch.brenzi.prettyprivateai.tts.TtsManager
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
 import ch.brenzi.prettyprivateai.ui.chat.ChatScreen
 import ch.brenzi.prettyprivateai.ui.chat.ChatViewModel
@@ -39,13 +40,14 @@ fun MainNavigation(
     repository: ChatRepository,
     proxyManager: ProxyManager,
     whisperManager: WhisperManager,
+    ttsManager: TtsManager,
 ) {
     val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(repository, whisperManager))
-    val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(repository, whisperManager))
+    val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(repository, whisperManager, ttsManager))
+    val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(repository, whisperManager, ttsManager))
 
     val chats by chatViewModel.chats.collectAsState()
     val currentChatId by chatViewModel.currentChatId.collectAsState()

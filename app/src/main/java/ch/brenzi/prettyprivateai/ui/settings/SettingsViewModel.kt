@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import ch.brenzi.prettyprivateai.data.repository.ChatRepository
+import ch.brenzi.prettyprivateai.tts.TtsManager
+import ch.brenzi.prettyprivateai.tts.TtsModelState
+import ch.brenzi.prettyprivateai.tts.TtsVoice
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
 import ch.brenzi.prettyprivateai.whisper.WhisperModelSize
 import ch.brenzi.prettyprivateai.whisper.WhisperModelState
@@ -16,6 +19,7 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(
     private val repository: ChatRepository,
     private val whisperManager: WhisperManager,
+    private val ttsManager: TtsManager,
 ) : ViewModel() {
 
     val apiKey: StateFlow<String?> = repository.apiKey
@@ -78,13 +82,51 @@ class SettingsViewModel(
         }
     }
 
+    // TTS
+
+    val ttsEnabled: StateFlow<Boolean> = repository.preferences.ttsEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val ttsModelState: StateFlow<TtsModelState> = ttsManager.modelState
+
+    val ttsVoice: StateFlow<TtsVoice> = repository.preferences.ttsVoice
+        .map { TtsVoice.fromString(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ttsManager.voice)
+
+    fun setTtsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.preferences.setTtsEnabled(enabled)
+            if (!enabled) {
+                ttsManager.deleteVoice()
+            }
+        }
+    }
+
+    fun setTtsVoice(voice: TtsVoice) {
+        viewModelScope.launch {
+            repository.preferences.setTtsVoice(voice.name)
+            ttsManager.setVoice(voice)
+            ttsManager.initialize()
+            if (ttsManager.modelState.value is TtsModelState.NotDownloaded) {
+                ttsManager.downloadVoice()
+            }
+        }
+    }
+
+    fun downloadTtsModel() {
+        viewModelScope.launch {
+            ttsManager.downloadVoice()
+        }
+    }
+
     class Factory(
         private val repository: ChatRepository,
         private val whisperManager: WhisperManager,
+        private val ttsManager: TtsManager,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(repository, whisperManager) as T
+            return SettingsViewModel(repository, whisperManager, ttsManager) as T
         }
     }
 }
