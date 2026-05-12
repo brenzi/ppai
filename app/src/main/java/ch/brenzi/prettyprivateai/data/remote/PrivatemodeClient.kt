@@ -42,7 +42,7 @@ class PrivatemodeClient(
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(Interceptor { chain ->
                 val request = chain.request().newBuilder()
-                    .addHeader("Privatemode-Version", "v1.23.0")
+                    .addHeader("Privatemode-Version", "v1.35.1")
                     .addHeader("Privatemode-Client", "App")
                     .build()
                 chain.proceed(request)

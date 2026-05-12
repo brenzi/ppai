@@ -109,7 +109,7 @@ for goarch in "${!ARCH_MAP[@]}"; do
         CXX="$CXX" \
         go build -buildmode=c-shared \
             -tags contrast_unstable_api \
-            -ldflags "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=v1.23.0'" \
+            -ldflags "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=v1.35.1'" \
             -o "$OUTPUT_DIR/libprivatemode_go.so" \
             .
     )
