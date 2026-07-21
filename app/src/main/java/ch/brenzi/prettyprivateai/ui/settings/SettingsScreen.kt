@@ -64,6 +64,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.platform.LocalUriHandler
+import ch.brenzi.prettyprivateai.BuildConfig
+import ch.brenzi.prettyprivateai.data.remote.PrivatemodeClient
 import ch.brenzi.prettyprivateai.tts.TtsModelState
 import ch.brenzi.prettyprivateai.tts.TtsVoice
 import ch.brenzi.prettyprivateai.ui.theme.*
@@ -573,6 +575,25 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "PrettyPrivateAI v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
+                Text(
+                    text = "Privatemode API ${PrivatemodeClient.API_VERSION}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextTertiary,
+                )
             }
 
             Spacer(modifier = Modifier.height(40.dp))

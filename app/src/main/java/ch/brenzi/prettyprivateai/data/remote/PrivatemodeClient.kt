@@ -35,6 +35,9 @@ class PrivatemodeClient(
     private val gson = Gson()
 
     companion object {
+        /** Privatemode API version advertised via the Privatemode-Version request header. */
+        const val API_VERSION = "v1.35.1"
+
         /** Shared OkHttpClient across all PrivatemodeClient instances for connection reuse. */
         val sharedClient: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -42,7 +45,7 @@ class PrivatemodeClient(
             .writeTimeout(30, TimeUnit.SECONDS)
             .addInterceptor(Interceptor { chain ->
                 val request = chain.request().newBuilder()
-                    .addHeader("Privatemode-Version", "v1.35.1")
+                    .addHeader("Privatemode-Version", API_VERSION)
                     .addHeader("Privatemode-Client", "App")
                     .build()
                 chain.proceed(request)
