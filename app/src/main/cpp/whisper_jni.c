@@ -102,12 +102,16 @@ Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeTranscribe(
         n_samples, (float)n_samples / 16000.0f, threads, lang,
         prompt_str ? (int)strlen(prompt_str) : 0);
 
-    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    /* Beam search with the default temperature-fallback ladder: markedly more
+     * accurate than greedy best_of=1 and detects/retries repetition loops
+     * (entropy_thold). Latency cost is acceptable per product decision. */
+    struct whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
     params.language = lang;
     params.n_threads = threads;
-    params.greedy.best_of = 1;
+    params.beam_search.beam_size = 5;
     params.single_segment = true;
     params.no_timestamps = true;
+    params.suppress_nst = true;  /* suppress non-speech tokens like "(music)" */
     params.print_progress = false;
     params.print_realtime = false;
     params.print_special = false;
@@ -122,14 +126,11 @@ Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeTranscribe(
         params.initial_prompt = prompt_str;
     }
 
-    /* Scale audio_ctx to actual recording length instead of default 1500 (30s).
-     * Whisper uses 50 mel frames/second, so n_samples/16000*50 = n_samples/320.
-     * Add 10% headroom and clamp to [64, 1500]. */
-    int frames_needed = (int)(n_samples / 320) + (int)(n_samples / 3200) + 16;
-    if (frames_needed < 64) frames_needed = 64;
-    if (frames_needed > 1500) frames_needed = 1500;
-    params.audio_ctx = frames_needed;
-    __android_log_print(ANDROID_LOG_INFO, TAG, "audio_ctx=%d for %d samples", frames_needed, n_samples);
+    /* Use the full audio_ctx (1500). Truncating it to the chunk length is a
+     * known latency hack, but A/B testing showed it destabilizes decoding
+     * (positional-embedding mismatch): repetition loops, hallucinated words,
+     * and constant temperature-fallback retries that cost more time than the
+     * smaller encoder saves. See scripts/test-whisper-quality.sh. */
 
     int ret = whisper_full(ctx, params, data, n_samples);
     (*env)->ReleaseFloatArrayElements(env, samples, data, JNI_ABORT);
@@ -177,6 +178,88 @@ JNIEXPORT jint JNICALL
 Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeGetProgress(
     JNIEnv *env, jobject thiz) {
     return (jint)atomic_load(&progress_pct);
+}
+
+/* Language detected by the most recent whisper_full run ("en", "de", ...).
+ * Used to pin auto-detected language for the rest of a recording session. */
+JNIEXPORT jstring JNICALL
+Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeGetDetectedLanguage(
+    JNIEnv *env, jobject thiz) {
+
+    if (ctx == NULL) return (*env)->NewStringUTF(env, "");
+    int id = whisper_full_lang_id(ctx);
+    const char *s = id >= 0 ? whisper_lang_str(id) : NULL;
+    return (*env)->NewStringUTF(env, s ? s : "");
+}
+
+/* ── Silero VAD ─────────────────────────────────────────────────────────── */
+
+static struct whisper_vad_context *vad_ctx = NULL;
+
+JNIEXPORT jint JNICALL
+Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeVadInit(
+    JNIEnv *env, jobject thiz, jstring modelPath) {
+
+    if (vad_ctx != NULL) {
+        whisper_vad_free(vad_ctx);
+        vad_ctx = NULL;
+    }
+
+    const char *path = (*env)->GetStringUTFChars(env, modelPath, NULL);
+    struct whisper_vad_context_params vparams = whisper_vad_default_context_params();
+    /* 1 thread: the Silero model is tiny, and ggml's barrier deadlocks with
+     * multiple threads on x86_64 emulators (see WhisperManager.transcribe). */
+    vparams.n_threads = 1;
+    vad_ctx = whisper_vad_init_from_file_with_params(path, vparams);
+    (*env)->ReleaseStringUTFChars(env, modelPath, path);
+
+    if (vad_ctx == NULL) {
+        __android_log_print(ANDROID_LOG_ERROR, TAG, "Failed to init VAD context");
+        return -1;
+    }
+    return 0;
+}
+
+/* Runs Silero VAD over the samples. Returns a flat array of speech segments
+ * [t0, t1, t0, t1, ...] in centiseconds, or NULL if VAD is unavailable. */
+JNIEXPORT jfloatArray JNICALL
+Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeVadSegments(
+    JNIEnv *env, jobject thiz, jfloatArray samples) {
+
+    if (vad_ctx == NULL) return NULL;
+
+    jsize n_samples = (*env)->GetArrayLength(env, samples);
+    jfloat *data = (*env)->GetFloatArrayElements(env, samples, NULL);
+    struct whisper_vad_params vp = whisper_vad_default_params();
+    struct whisper_vad_segments *segs =
+        whisper_vad_segments_from_samples(vad_ctx, vp, data, n_samples);
+    (*env)->ReleaseFloatArrayElements(env, samples, data, JNI_ABORT);
+
+    if (segs == NULL) return NULL;
+
+    int n = whisper_vad_segments_n_segments(segs);
+    jfloatArray out = (*env)->NewFloatArray(env, n * 2);
+    if (out != NULL) {
+        for (int i = 0; i < n; i++) {
+            jfloat pair[2] = {
+                whisper_vad_segments_get_segment_t0(segs, i),
+                whisper_vad_segments_get_segment_t1(segs, i),
+            };
+            (*env)->SetFloatArrayRegion(env, out, i * 2, 2, pair);
+        }
+    }
+    whisper_vad_free_segments(segs);
+    return out;
+}
+
+JNIEXPORT void JNICALL
+Java_ch_brenzi_prettyprivateai_whisper_WhisperNative_nativeVadFree(
+    JNIEnv *env, jobject thiz) {
+
+    if (vad_ctx != NULL) {
+        whisper_vad_free(vad_ctx);
+        vad_ctx = NULL;
+    }
 }
 
 JNIEXPORT void JNICALL

@@ -29,4 +29,10 @@ object WhisperNative {
     external fun nativeAbort()
     external fun nativeFree()
     external fun nativeIsLoaded(): Boolean
+    /** Language detected by the most recent transcription ("en", "de", ...), or "". */
+    external fun nativeGetDetectedLanguage(): String
+    external fun nativeVadInit(modelPath: String): Int
+    /** Speech segments as [t0, t1, ...] in centiseconds, or null if VAD unavailable. */
+    external fun nativeVadSegments(samples: FloatArray): FloatArray?
+    external fun nativeVadFree()
 }

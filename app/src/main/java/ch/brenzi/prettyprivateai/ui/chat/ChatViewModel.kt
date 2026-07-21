@@ -28,6 +28,7 @@ import ch.brenzi.prettyprivateai.whisper.AudioRecorder
 import ch.brenzi.prettyprivateai.whisper.WhisperManager
 import ch.brenzi.prettyprivateai.whisper.WhisperModelState
 import ch.brenzi.prettyprivateai.whisper.WhisperNative
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -144,6 +145,9 @@ class ChatViewModel(
     // Shared pipeline state — written by pipeline coroutine, read by stopRecording
     private var pipelineTranscribedUpTo = 0
     private val pipelineCommitted = StringBuilder()
+
+    /** Language pinned after the first auto-detected chunk, so all chunks of one session agree. */
+    private var pinnedLanguage: String? = null
 
     private val _attachedFiles = MutableStateFlow<List<AttachedFile>>(emptyList())
     val attachedFiles: StateFlow<List<AttachedFile>> = _attachedFiles.asStateFlow()
@@ -405,7 +409,7 @@ If you can answer from your existing knowledge, answer normally without using th
             _liveTranscription.value = ""
             _statusMessage.value = "Transcribing audio file..."
             try {
-                val language = _whisperLanguage.value
+                pinnedLanguage = null
                 val committed = StringBuilder()
 
                 withContext(Dispatchers.IO) {
@@ -414,9 +418,11 @@ If you can answer from your existing knowledge, answer normally without using th
                             .coerceIn(0, 100)
                         Log.i(TAG, "Transcribing file chunk ${chunkIndex+1}/$estTotal (${chunk.size / 16000f}s) $pct%")
                         _statusMessage.value = "Transcribing ${chunkIndex + 1}/$estTotal ($pct%)"
+                        if (!hasSpeech(chunk)) return@decodeChunked
                         val prompt = committed.toString().ifEmpty { null }
-                        val text = whisperManager.transcribe(chunk, language, prompt)
+                        val text = whisperManager.transcribe(chunk, effectiveLanguage(), prompt)
                         if (text.isNotBlank()) {
+                            maybePinLanguage()
                             if (committed.isEmpty()) {
                                 committed.append(text.trim())
                             } else {
@@ -462,6 +468,7 @@ If you can answer from your existing knowledge, answer normally without using th
         _liveTranscription.value = ""
         pipelineTranscribedUpTo = 0
         pipelineCommitted.clear()
+        pinnedLanguage = null
 
         // Collect amplitudes for waveform
         viewModelScope.launch {
@@ -513,11 +520,13 @@ If you can answer from your existing knowledge, answer normally without using th
                 val total = recorder.getSampleCount()
                 val tailSamples = recorder.getSamplesRange(pipelineTranscribedUpTo, total)
 
-                if (tailSamples.size >= MIN_TAIL_SAMPLES) {
+                val tailHasSpeech = tailSamples.size >= MIN_TAIL_SAMPLES &&
+                    withContext(Dispatchers.Default) { hasSpeech(tailSamples) }
+                if (tailHasSpeech) {
                     val tailPrompt = pipelineCommitted.toString().ifEmpty { null }
                     val text = withContext(Dispatchers.Default) {
                         withTimeout(TRANSCRIPTION_TIMEOUT_MS) {
-                            whisperManager.transcribe(tailSamples, _whisperLanguage.value, tailPrompt)
+                            whisperManager.transcribe(tailSamples, effectiveLanguage(), tailPrompt)
                         }
                     }
                     if (text.isNotBlank()) {
@@ -570,6 +579,52 @@ If you can answer from your existing knowledge, answer normally without using th
         }
     }
 
+    /** Effective transcription language: explicit user choice, else the pinned auto-detection. */
+    private fun effectiveLanguage(): String =
+        _whisperLanguage.value.takeIf { it != "auto" } ?: pinnedLanguage ?: "auto"
+
+    /** Pins the auto-detected language after the first successfully transcribed chunk. */
+    private fun maybePinLanguage() {
+        if (_whisperLanguage.value == "auto" && pinnedLanguage == null) {
+            pinnedLanguage = whisperManager.detectedLanguage().takeIf { it.isNotBlank() }
+            if (pinnedLanguage != null) Log.i(TAG, "Pinned language: $pinnedLanguage")
+        }
+    }
+
+    /** True if VAD detects speech in [samples]; defaults to true when VAD is unavailable. */
+    private fun hasSpeech(samples: FloatArray): Boolean {
+        val segments = whisperManager.vadSegments(samples) ?: return true
+        return segments.isNotEmpty()
+    }
+
+    /**
+     * Finds a chunk boundary near [targetEnd] using Silero VAD: the midpoint of
+     * the non-speech gap closest to the target within ±[AudioRecorder.GAP_SEARCH_RADIUS].
+     * Falls back to the amplitude heuristic when VAD is unavailable or finds no gap.
+     */
+    private fun findChunkBoundary(recorder: AudioRecorder, targetEnd: Int): Int {
+        val windowStart = (targetEnd - AudioRecorder.GAP_SEARCH_RADIUS).coerceAtLeast(0)
+        val window = recorder.getSamplesRange(windowStart, targetEnd + AudioRecorder.GAP_SEARCH_RADIUS)
+        val segments = whisperManager.vadSegments(window)
+            ?: return recorder.findSilenceGap(targetEnd)
+        if (segments.isEmpty()) return targetEnd // window is all silence
+
+        // Speech intervals in absolute sample coords (VAD times are centiseconds → ×160 samples)
+        val speech = (segments.indices step 2).map {
+            Pair(windowStart + (segments[it] * 160).toInt(), windowStart + (segments[it + 1] * 160).toInt())
+        }
+        // Target already falls in a pause → keep it
+        if (speech.none { targetEnd in it.first..it.second }) return targetEnd
+
+        // Candidate boundaries: midpoints of the pauses between/around speech intervals
+        val windowEnd = windowStart + window.size
+        val edges = listOf(windowStart) + speech.flatMap { listOf(it.first, it.second) } + listOf(windowEnd)
+        val candidates = (0 until edges.size step 2)
+            .map { (edges[it] + edges[it + 1]) / 2 }
+            .filter { mid -> speech.none { mid in it.first..it.second } }
+        return candidates.minByOrNull { abs(it - targetEnd) } ?: recorder.findSilenceGap(targetEnd)
+    }
+
     private suspend fun runTranscriptionPipeline(recorder: AudioRecorder) {
         while (coroutineContext[Job]?.isActive == true && _isRecording.value) {
             val total = recorder.getSampleCount()
@@ -581,22 +636,25 @@ If you can answer from your existing knowledge, answer normally without using th
                 continue
             }
 
-            // Find a silence gap near the target chunk end to avoid splitting words
+            // Find a speech pause near the target chunk end to avoid splitting words
             val targetEnd = minOf(total, pipelineTranscribedUpTo + CHUNK_SAMPLES)
-            val chunkEnd = recorder.findSilenceGap(targetEnd)
+            val chunkEnd = findChunkBoundary(recorder, targetEnd)
                 .coerceIn(pipelineTranscribedUpTo + 1, total)
             val samples = recorder.getSamplesRange(pipelineTranscribedUpTo, chunkEnd)
 
             try {
-                val prompt = pipelineCommitted.toString().ifEmpty { null }
-                val text = whisperManager.transcribe(samples, _whisperLanguage.value, prompt)
-                if (text.isNotBlank()) {
-                    if (pipelineCommitted.isEmpty()) {
-                        pipelineCommitted.append(text.trim())
-                    } else {
-                        pipelineCommitted.append(" ").append(text.trim())
+                if (hasSpeech(samples)) {
+                    val prompt = pipelineCommitted.toString().ifEmpty { null }
+                    val text = whisperManager.transcribe(samples, effectiveLanguage(), prompt)
+                    if (text.isNotBlank()) {
+                        maybePinLanguage()
+                        if (pipelineCommitted.isEmpty()) {
+                            pipelineCommitted.append(text.trim())
+                        } else {
+                            pipelineCommitted.append(" ").append(text.trim())
+                        }
+                        _liveTranscription.value = pipelineCommitted.toString()
                     }
-                    _liveTranscription.value = pipelineCommitted.toString()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Pipeline chunk transcription failed", e)

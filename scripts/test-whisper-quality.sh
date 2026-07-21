@@ -3,7 +3,7 @@
 #
 # Replicates the exact same transcription strategy as the Android app:
 #   1. Split audio into 10-second chunks (AudioDecoder.CHUNK_SECONDS = 10)
-#   2. Greedy decoding, best_of=1 (whisper_jni.c params)
+#   2. Beam-search decoding, beam 5 (whisper_jni.c params)
 #   3. Pass accumulated transcription as initial_prompt to next chunk
 #   4. Concatenate all chunk outputs
 #
@@ -116,8 +116,8 @@ fi
 
 # ── Transcribe ───────────────────────────────────────────────────────────────
 
-# Flags matching whisper_jni.c: greedy, best_of=1, no timestamps
-APP_FLAGS="--best-of 1 --beam-size 1 --no-timestamps"
+# Flags matching whisper_jni.c: beam search 5, suppress non-speech tokens, no timestamps
+APP_FLAGS="--beam-size 5 --suppress-nst --no-timestamps"
 
 echo ""
 echo "═══════════════════════════════════════════"

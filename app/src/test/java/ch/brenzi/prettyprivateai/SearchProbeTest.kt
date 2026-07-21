@@ -90,7 +90,7 @@ class SearchProbeTest {
 
         coVerify {
             repo.streamChatCompletion(
-                eq("openai/gpt-oss-120b"),
+                eq("gpt-oss-latest"),
                 match { it.size == 1 && it[0].role == MessageRole.USER },
                 match { it != null && it.contains("web search tool") && it.contains("[SEARCH:") },
                 any(), any(), any(),
@@ -301,7 +301,7 @@ class SearchProbeTest {
     }
 
     private fun createMockRepo(
-        modelId: String = "openai/gpt-oss-120b",
+        modelId: String = "gpt-oss-latest",
         modelResponse: String = "Hello",
     ): ChatRepository {
         return mockk {

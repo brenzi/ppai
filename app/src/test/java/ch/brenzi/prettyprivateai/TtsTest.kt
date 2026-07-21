@@ -194,7 +194,7 @@ class TtsTest {
             every { currentChatId } returns MutableStateFlow<String?>(null)
             every { modelsLoaded } returns MutableStateFlow(true)
             every { availableModels } returns MutableStateFlow(emptyList())
-            every { selectedModel } returns flowOf("openai/gpt-oss-120b")
+            every { selectedModel } returns flowOf("gpt-oss-latest")
             every { extendedThinking } returns flowOf(false)
             every { whisperLanguage } returns flowOf("auto")
 

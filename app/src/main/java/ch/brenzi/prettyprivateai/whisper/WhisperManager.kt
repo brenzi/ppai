@@ -51,6 +51,10 @@ class WhisperManager(private val context: Context) {
 
     private val TAG = "WhisperManager"
     private val MODEL_DIR = "whisper"
+    private val VAD_MODEL_ASSET = "ggml-silero-v5.1.2.bin"
+
+    @Volatile
+    private var vadReady = false
 
     /** Serializes initialize/download — prevents concurrent model loading and duplicate downloads. */
     private val modelMutex = Mutex()
@@ -92,6 +96,7 @@ class WhisperManager(private val context: Context) {
                 val result = WhisperNative.nativeInit(file.absolutePath)
                 _modelState.value = if (result == 0) {
                     Log.i(TAG, "Model loaded successfully")
+                    initVad()
                     WhisperModelState.Ready
                 } else {
                     Log.e(TAG, "nativeInit returned $result")
@@ -191,12 +196,38 @@ class WhisperManager(private val context: Context) {
             }
             val result = WhisperNative.nativeInit(file.absolutePath)
             _modelState.value = if (result == 0) {
+                initVad()
                 WhisperModelState.Ready
             } else {
                 WhisperModelState.Error("Failed to load model")
             }
         }
     }
+
+    /** Extracts the bundled Silero VAD model and initializes the VAD context. Non-fatal on failure. */
+    private fun initVad() {
+        try {
+            val file = File(modelDir(), VAD_MODEL_ASSET)
+            if (!file.exists() || file.length() == 0L) {
+                modelDir().mkdirs()
+                context.assets.open(VAD_MODEL_ASSET).use { input ->
+                    FileOutputStream(file).use { output -> input.copyTo(output) }
+                }
+            }
+            vadReady = WhisperNative.nativeVadInit(file.absolutePath) == 0
+            if (!vadReady) Log.w(TAG, "VAD init failed — falling back to amplitude gap detection")
+        } catch (e: Exception) {
+            Log.w(TAG, "VAD setup failed", e)
+            vadReady = false
+        }
+    }
+
+    /** Speech segments as [t0, t1, ...] in centiseconds, or null if VAD is unavailable. */
+    fun vadSegments(samples: FloatArray): FloatArray? =
+        if (vadReady) WhisperNative.nativeVadSegments(samples) else null
+
+    /** Language detected by the most recent transcription ("en", "de", ...), or "". */
+    fun detectedLanguage(): String = WhisperNative.nativeGetDetectedLanguage()
 
     fun deleteModel() {
         if (WhisperNative.isLoaded()) WhisperNative.nativeFree()
